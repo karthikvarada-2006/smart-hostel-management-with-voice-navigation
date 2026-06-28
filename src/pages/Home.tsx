@@ -91,16 +91,16 @@ export default function Home() {
             Streamline attendance, passes, complaints, and more — all in one place.
           </p>
           <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <Button asChild size="lg" className="gap-2 px-8">
+            <Button asChild size="lg" className="gap-3 px-10 py-4 text-base">
               <Link to="/student/login">
                 Get Started as Student
-                <ArrowRight className="h-4 w-4" />
+                <ArrowRight className="h-5 w-5" />
               </Link>
             </Button>
-            <Button asChild variant="outline" size="lg" className="gap-2 px-8">
+            <Button asChild variant="outline" size="lg" className="gap-3 px-10 py-4 text-base">
               <Link to="/admin/login">
                 Admin Portal
-                <Shield className="h-4 w-4" />
+                <Shield className="h-5 w-5" />
               </Link>
             </Button>
           </div>

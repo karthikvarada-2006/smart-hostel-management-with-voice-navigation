@@ -213,15 +213,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   ) => {
     const redirectUrl = `${window.location.origin}/`;
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-      },
-    });
+    let data, error;
+    try {
+      const result = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: redirectUrl,
+        },
+      });
+      data = result.data;
+      error = result.error;
+    } catch (fetchError: any) {
+      // Network errors / rate limit errors that throw instead of returning
+      return { error: new Error(fetchError?.message || "Network error. Please check your connection and try again.") };
+    }
 
     if (error) return { error };
+
+    // Supabase returns a user with empty identities when email confirmation is
+    // enabled and the email is already taken (to avoid leaking user existence).
+    // Also catches rate-limited signup where no real user is created.
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      return { error: new Error("This email is already registered or signup is rate-limited. Please try logging in or wait a few minutes.") };
+    }
 
     // Create profile for the new user
     if (data.user) {
@@ -245,6 +260,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return { error: null };
   };
+
 
   const signOut = async () => {
     // 1. Clear all auth state immediately

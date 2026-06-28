@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Coffee, Sun, Moon, Plus, Edit2, UtensilsCrossed, RefreshCw } from "lucide-react";
+import { Coffee, Sun, Moon, Plus, Edit2, UtensilsCrossed, RefreshCw, ArrowLeft, CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { format, addDays, startOfWeek, isToday, isSameDay } from "date-fns";
@@ -36,9 +37,12 @@ interface DayMenu {
 export default function Menu() {
   const { isAdmin, profile } = useAuth();
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [weeklyMenu, setWeeklyMenu] = useState<DayMenu[]>([]);
   const [editingDay, setEditingDay] = useState<DayMenu | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [requestedDateMenu, setRequestedDateMenu] = useState<DayMenu | null>(null);
+  const [requestedDateStr, setRequestedDateStr] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     breakfast: "",
     lunch: "",
@@ -54,6 +58,44 @@ export default function Menu() {
     setRefreshing(true);
     await fetchWeeklyMenu();
     setRefreshing(false);
+  };
+
+  // Fetch menu for a specific requested date (from voice command URL param)
+  const fetchRequestedDateMenu = useCallback(async (dateParam: string) => {
+    setRequestedDateStr(dateParam);
+    const { data } = await supabase
+      .from("food_menu")
+      .select("*")
+      .eq("menu_date", dateParam)
+      .maybeSingle();
+
+    if (data) {
+      setRequestedDateMenu(data);
+    } else {
+      setRequestedDateMenu({
+        menu_date: dateParam,
+        breakfast: null,
+        lunch: null,
+        dinner: null,
+      });
+    }
+  }, []);
+
+  // Read ?date= query param
+  useEffect(() => {
+    const dateParam = searchParams.get("date");
+    if (dateParam) {
+      fetchRequestedDateMenu(dateParam);
+    } else {
+      setRequestedDateMenu(null);
+      setRequestedDateStr(null);
+    }
+  }, [searchParams, fetchRequestedDateMenu]);
+
+  const clearRequestedDate = () => {
+    setRequestedDateMenu(null);
+    setRequestedDateStr(null);
+    setSearchParams({});
   };
 
   useEffect(() => {
@@ -182,17 +224,42 @@ export default function Menu() {
 
   const todayMenu = getMenuForDate(new Date());
 
+  // Determine which menu to show in the top card
+  const displayMenu = requestedDateMenu || todayMenu;
+  const displayDate = requestedDateStr
+    ? new Date(requestedDateStr + "T00:00:00")
+    : new Date();
+  const isRequestedDate = !!requestedDateStr;
+  const isDisplayToday = isToday(displayDate);
+
   return (
     <div className="space-y-6">
-      {/* Today's Menu Card */}
+      {/* Requested / Today's Menu Card */}
       <Card className="card-shadow overflow-hidden">
         <CardHeader className="bg-gradient-to-r from-primary to-primary/80 text-primary-foreground">
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
-              <UtensilsCrossed className="h-5 w-5" />
-              Today's Menu
+              {isRequestedDate && !isDisplayToday ? (
+                <CalendarDays className="h-5 w-5" />
+              ) : (
+                <UtensilsCrossed className="h-5 w-5" />
+              )}
+              {isRequestedDate && !isDisplayToday
+                ? `Menu for ${format(displayDate, "EEEE, MMM d")}`
+                : "Today's Menu"}
             </CardTitle>
             <div className="flex items-center gap-2">
+              {isRequestedDate && !isDisplayToday && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-primary-foreground hover:bg-primary-foreground/10 gap-1"
+                  onClick={clearRequestedDate}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to Today
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -204,13 +271,13 @@ export default function Menu() {
                 <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
               </Button>
               <Badge className="bg-primary-foreground/20 text-primary-foreground">
-                {format(new Date(), "EEEE, MMM d")}
+                {format(displayDate, "EEEE, MMM d")}
               </Badge>
             </div>
           </div>
         </CardHeader>
         <CardContent className="p-6">
-          {todayMenu ? (
+          {displayMenu && (displayMenu.breakfast || displayMenu.lunch || displayMenu.dinner) ? (
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="flex items-start gap-3 rounded-xl bg-amber-50 p-4 dark:bg-amber-900/20">
                 <Coffee className="h-6 w-6 text-amber-600" />
@@ -219,7 +286,7 @@ export default function Menu() {
                     Breakfast
                   </p>
                   <p className="mt-1 text-sm text-amber-800 dark:text-amber-200">
-                    {todayMenu.breakfast || "Not updated"}
+                    {displayMenu.breakfast || "Not updated"}
                   </p>
                 </div>
               </div>
@@ -230,7 +297,7 @@ export default function Menu() {
                     Lunch
                   </p>
                   <p className="mt-1 text-sm text-orange-800 dark:text-orange-200">
-                    {todayMenu.lunch || "Not updated"}
+                    {displayMenu.lunch || "Not updated"}
                   </p>
                 </div>
               </div>
@@ -241,7 +308,7 @@ export default function Menu() {
                     Dinner
                   </p>
                   <p className="mt-1 text-sm text-indigo-800 dark:text-indigo-200">
-                    {todayMenu.dinner || "Not updated"}
+                    {displayMenu.dinner || "Not updated"}
                   </p>
                 </div>
               </div>
@@ -250,15 +317,29 @@ export default function Menu() {
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <UtensilsCrossed className="h-12 w-12 text-muted-foreground" />
               <p className="mt-2 text-lg font-medium text-muted-foreground">
-                Menu not updated yet
+                {isRequestedDate && !isDisplayToday
+                  ? `No menu set for ${format(displayDate, "EEEE, MMM d")}`
+                  : "Menu not updated yet"}
               </p>
               {isAdmin && (
                 <Button
                   className="mt-4"
-                  onClick={() => handleEditClick(new Date())}
+                  onClick={() => handleEditClick(displayDate)}
                 >
                   <Plus className="mr-2 h-4 w-4" />
-                  Add Today's Menu
+                  {isRequestedDate && !isDisplayToday
+                    ? `Add Menu for ${format(displayDate, "MMM d")}`
+                    : "Add Today's Menu"}
+                </Button>
+              )}
+              {isRequestedDate && !isDisplayToday && (
+                <Button
+                  variant="ghost"
+                  className="mt-2"
+                  onClick={clearRequestedDate}
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Back to Today
                 </Button>
               )}
             </div>

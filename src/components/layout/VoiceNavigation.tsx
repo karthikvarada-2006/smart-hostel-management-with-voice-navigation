@@ -759,13 +759,21 @@ export function VoiceNavigation() {
             }
 
             // Parse the date
+            // Helper to format a local Date as YYYY-MM-DD without UTC conversion
+            const toLocalDateStr = (dt: Date): string => {
+                const y = dt.getFullYear();
+                const m = String(dt.getMonth() + 1).padStart(2, "0");
+                const d = String(dt.getDate()).padStart(2, "0");
+                return `${y}-${m}-${d}`;
+            };
+
             const parseMenuDate = (d: string): string => {
                 const today = new Date();
                 const lower = d.toLowerCase().trim();
-                if (!lower || lower === "today") return today.toISOString().split("T")[0];
+                if (!lower || lower === "today") return toLocalDateStr(today);
                 if (lower === "tomorrow") {
                     const t = new Date(today); t.setDate(t.getDate() + 1);
-                    return t.toISOString().split("T")[0];
+                    return toLocalDateStr(t);
                 }
                 // Try parsing "25 march", "march 25", "25 march 2026", etc.
                 const months: Record<string, number> = {
@@ -780,7 +788,7 @@ export function VoiceNavigation() {
                     const month = months[match[2]];
                     const year = match[3] ? parseInt(match[3]) : today.getFullYear();
                     if (month !== undefined && day >= 1 && day <= 31) {
-                        return new Date(year, month, day).toISOString().split("T")[0];
+                        return toLocalDateStr(new Date(year, month, day));
                     }
                 }
                 // "march 25" or "march 25 2026"
@@ -790,10 +798,10 @@ export function VoiceNavigation() {
                     const day = parseInt(match[2]);
                     const year = match[3] ? parseInt(match[3]) : today.getFullYear();
                     if (month !== undefined && day >= 1 && day <= 31) {
-                        return new Date(year, month, day).toISOString().split("T")[0];
+                        return toLocalDateStr(new Date(year, month, day));
                     }
                 }
-                return today.toISOString().split("T")[0];
+                return toLocalDateStr(today);
             };
 
             const menuDate = parseMenuDate(dateStr || "today");
@@ -829,7 +837,87 @@ export function VoiceNavigation() {
                     speakResponse(`${mealNames} for ${dateStr || "today"} saved successfully`);
                 }
             }
-            navigate("/admin/menu");
+            navigate(isAdmin ? "/admin/menu" : "/menu");
+        },
+        view_menu: async (params: any) => {
+            const { dateStr } = params;
+
+            // Reuse the same local date helper
+            const toLocalDateStr2 = (dt: Date): string => {
+                const y = dt.getFullYear();
+                const m = String(dt.getMonth() + 1).padStart(2, "0");
+                const d = String(dt.getDate()).padStart(2, "0");
+                return `${y}-${m}-${d}`;
+            };
+
+            const parseViewDate = (d: string): string => {
+                const today = new Date();
+                const lower = d.toLowerCase().trim();
+                if (!lower || lower === "today") return toLocalDateStr2(today);
+                if (lower === "tomorrow") {
+                    const t = new Date(today); t.setDate(t.getDate() + 1);
+                    return toLocalDateStr2(t);
+                }
+                const months: Record<string, number> = {
+                    january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+                    july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+                    jan: 0, feb: 1, mar: 2, apr: 3, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+                };
+                let match = lower.match(/(\d{1,2})\s+([a-z]+)(?:\s+(\d{4}))?/);
+                if (match) {
+                    const day = parseInt(match[1]);
+                    const month = months[match[2]];
+                    const year = match[3] ? parseInt(match[3]) : today.getFullYear();
+                    if (month !== undefined && day >= 1 && day <= 31) {
+                        return toLocalDateStr2(new Date(year, month, day));
+                    }
+                }
+                match = lower.match(/([a-z]+)\s+(\d{1,2})(?:\s+(\d{4}))?/);
+                if (match) {
+                    const month = months[match[1]];
+                    const day = parseInt(match[2]);
+                    const year = match[3] ? parseInt(match[3]) : today.getFullYear();
+                    if (month !== undefined && day >= 1 && day <= 31) {
+                        return toLocalDateStr2(new Date(year, month, day));
+                    }
+                }
+                return toLocalDateStr2(today);
+            };
+
+            const menuDate = parseViewDate(dateStr || "today");
+            console.log("[ViewMenu] Fetching menu for date:", menuDate);
+
+            // Navigate to menu page with date param so it displays the requested date
+            const menuPath = isAdmin ? "/admin/menu" : "/menu";
+            navigate(`${menuPath}?date=${menuDate}`);
+
+            // Also fetch and speak the menu
+            const { data, error } = await supabase
+                .from("food_menu")
+                .select("breakfast, lunch, dinner")
+                .eq("menu_date", menuDate)
+                .maybeSingle();
+
+            if (error) {
+                speakResponse(`Failed to fetch menu: ${error.message}`);
+                return;
+            }
+
+            if (!data) {
+                speakResponse(`No menu found for ${dateStr || "today"}`);
+                return;
+            }
+
+            const parts: string[] = [];
+            if (data.breakfast) parts.push(`Breakfast is ${data.breakfast}`);
+            if (data.lunch) parts.push(`Lunch is ${data.lunch}`);
+            if (data.dinner) parts.push(`Dinner is ${data.dinner}`);
+
+            if (parts.length === 0) {
+                speakResponse(`Menu for ${dateStr || "today"} has no items set yet`);
+            } else {
+                speakResponse(`Menu for ${dateStr || "today"}: ${parts.join(", ")}`);
+            }
         },
         scroll: (params: any) => {
             const direction = params.direction || "down";
@@ -1188,6 +1276,36 @@ export function VoiceNavigation() {
         // Check if multiple meals are mentioned (e.g. "today breakfast is idli, lunch is rice, dinner is chapati")
         const mealWords = "breakfast|lunch|dinner";
         const mealKeywordCount = (rawText.match(/\b(breakfast|lunch|dinner)\b/gi) || []).length;
+
+        // --- Menu: view/show menu for a specific date ---
+        // "show april 11 menu", "show menu for april 11", "view today's menu"
+        // "what is the menu for april 11", "april 11 menu"
+        const viewMenuMatch = rawText.match(
+            /\b(?:show|view|display|what(?:'s|\s+is)(?:\s+the)?)\s+(?:(?:menu|food)\s+(?:for|on|of)\s+)?(today|tomorrow|(?:\d{1,2}\s+[a-z]+(?:\s+\d{4})?)|(?:[a-z]+\s+\d{1,2}(?:\s+\d{4})?))(?:'s)?\s*(?:menu|food)?$/i
+        );
+        if (viewMenuMatch) {
+            const dateStr = viewMenuMatch[1].trim().replace(/[.,!?]+$/, "");
+            console.log("[LocalParser] view_menu:", { dateStr });
+            return { intent: "view_menu", entity: "menu", parameters: { dateStr } };
+        }
+        // Also match: "show menu for today", "show menu for tomorrow", "show menu for april 11"
+        const viewMenuMatch2 = rawText.match(
+            /\b(?:show|view|display)\s+(?:the\s+)?menu\s+(?:for|on|of)\s+(today|tomorrow|(?:\d{1,2}\s+[a-z]+(?:\s+\d{4})?)|(?:[a-z]+\s+\d{1,2}(?:\s+\d{4})?))\b/i
+        );
+        if (viewMenuMatch2) {
+            const dateStr = viewMenuMatch2[1].trim().replace(/[.,!?]+$/, "");
+            console.log("[LocalParser] view_menu (alt):", { dateStr });
+            return { intent: "view_menu", entity: "menu", parameters: { dateStr } };
+        }
+        // Match: "april 11 menu" / "tomorrow menu" / "today menu" (date followed by menu)
+        const viewMenuMatch3 = rawText.match(
+            /^(?:show\s+)?(?:the\s+)?(today|tomorrow|(?:\d{1,2}\s+[a-z]+(?:\s+\d{4})?)|(?:[a-z]+\s+\d{1,2}(?:\s+\d{4})?))(?:'s)?\s+menu$/i
+        );
+        if (viewMenuMatch3) {
+            const dateStr = viewMenuMatch3[1].trim().replace(/[.,!?]+$/, "");
+            console.log("[LocalParser] view_menu (date+menu):", { dateStr });
+            return { intent: "view_menu", entity: "menu", parameters: { dateStr } };
+        }
 
         if (mealKeywordCount >= 2) {
             // Multi-meal pattern: split text by meal keywords, extract food after "is/to/as"
